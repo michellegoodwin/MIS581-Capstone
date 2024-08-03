@@ -1,0 +1,174 @@
+# Load necessary libraries
+library(readr)
+library(caTools)
+library(caret)
+library(e1071)
+library(pROC)
+library(dplyr)
+library(randomForest)
+
+# Read the data
+file_path <- "C:/Users/miche/Documents/heart.csv"
+heart_data <- read_csv(file_path)
+
+# Split the data into training and testing sets
+set.seed(123)
+split <- sample.split(heart_data$target, SplitRatio = 0.6)
+train_data <- subset(heart_data, split == TRUE)
+test_data <- subset(heart_data, split == FALSE)
+
+# Print the number of observations in the training and testing sets
+cat("Number of observations in the training set:", nrow(train_data), "\n")
+cat("Number of observations in the testing set:", nrow(test_data), "\n")
+
+# Train logistic regression model with all predictors
+logistic_model <- glm(target ~ ., data = train_data, family = binomial)
+summary(logistic_model)
+
+# Predict on test data
+predictions <- predict(logistic_model, newdata = test_data, type = "response")
+predicted_classes <- ifelse(predictions > 0.5, 1, 0)
+
+# Confusion Matrix
+confusion <- confusionMatrix(as.factor(predicted_classes), as.factor(test_data$target))
+print(confusion)
+
+# ROC Curve and AUC
+roc_curve <- roc(test_data$target, predictions)
+auc <- auc(roc_curve)
+print(paste("AUC:", auc))
+plot(roc_curve, main = "ROC Curve")
+
+# Calculate and print performance metrics
+accuracy <- confusion$overall["Accuracy"]
+precision <- confusion$byClass["Pos Pred Value"]
+recall <- confusion$byClass["Sensitivity"]
+f1 <- 2 * ((precision * recall) / (precision + recall))
+
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1 Score:", f1, "\n")
+
+# Fit the Random Forest model on the training data
+rf_model <- randomForest(target ~ ., data = train_data, ntree = 100)
+print(rf_model)
+
+# Make predictions on the test data
+predictions_rf <- predict(rf_model, newdata = test_data)
+confusion_rf <- confusionMatrix(predictions_rf, test_data$target)
+print(confusion_rf)
+
+# Calculate ROC curve and AUC
+roc_curve_rf <- roc(test_data$target, as.numeric(predictions_rf))
+auc_value_rf <- auc(roc_curve_rf)
+print(paste("AUC:", auc_value_rf))
+plot(roc_curve_rf, main = "ROC Curve")
+
+# Extract performance metrics
+accuracy_rf <- confusion_rf$overall["Accuracy"]
+precision_rf <- confusion_rf$byClass["Pos Pred Value"]
+recall_rf <- confusion_rf$byClass["Sensitivity"]
+f1_rf <- 2 * ((precision_rf * recall_rf) / (precision_rf + recall_rf))
+
+# Print performance metrics
+cat("Accuracy:", accuracy_rf, "\n")
+cat("Precision:", precision_rf, "\n")
+cat("Recall:", recall_rf, "\n")
+cat("F1 Score:", f1_rf, "\n")
+
+# Define the parameter grid for cross-validation
+tune_grid <- expand.grid(
+    .mtry = c(2, 3, 4, 5),
+    .splitrule = c("gini", "extratrees"),
+    .min.node.size = c(1, 5, 10)
+)
+
+# Train the model using grid search with cross-validation
+rf_model_cv <- train(
+    target ~ ., 
+    data = train_data, 
+    method = "ranger", 
+    trControl = trainControl(method = "cv", number = 10),
+    tuneGrid = tune_grid
+)
+print(rf_model_cv)
+
+# Train the final model with the best parameters
+rf_model_final <- randomForest(target ~ ., data = train_data, ntree = 500, mtry = 3, nodesize = 5)
+
+# Make predictions on the test data with the final model
+predictions_final <- predict(rf_model_final, test_data)
+predictions_final <- factor(predictions_final, levels = levels(test_data$target))
+confusion_final <- confusionMatrix(predictions_final, test_data$target)
+print(confusion_final)
+
+# Calculate ROC curve and AUC for the final model
+roc_curve_final <- roc(test_data$target, as.numeric(predictions_final))
+roc_auc_final <- auc(roc_curve_final)
+print(paste("AUC:", roc_auc_final))
+plot(roc_curve_final, main = "ROC Curve")
+
+# Print performance metrics for the final model
+print(paste("Accuracy: ", confusion_final$overall['Accuracy']))
+print(paste("Precision: ", confusion_final$byClass['Pos Pred Value']))
+print(paste("Recall: ", confusion_final$byClass['Sensitivity']))
+print(paste("F1 Score: ", confusion_final$byClass['F1']))
+
+# Converting 'sex' to a factor with labels
+heart_data$sex <- factor(heart_data$sex, levels = c(0, 1), labels = c("Female", "Male"))
+
+# Converting 'target' to a factor
+heart_data$target <- factor(heart_data$target)
+
+# Creating a contingency table
+contingency_table <- table(heart_data$sex, heart_data$target)
+
+# Performing Chi-squared test
+chi_sq_test <- chisq.test(contingency_table)
+
+# Printing Chi-squared test result
+print(chi_sq_test)
+
+# Converting 'target' back to numeric for t-test
+heart_data$target <- as.numeric(as.character(heart_data$target))
+
+# Performing t-test
+t_test <- t.test(target ~ sex, data = heart_data)
+
+# Printing t-test result
+print(t_test)
+
+# Logistic regression with age as predictor
+logistic_model_age <- glm(target ~ age, data = heart_data, family = binomial)
+summary(logistic_model_age)
+
+# Set up cross-validation method
+cv_method <- trainControl(method = "cv", number = 10, savePredictions = "all")
+
+# Train logistic regression model with cross-validation
+logistic_model_cv <- train(target ~ ., 
+                           data = heart_data, 
+                           method = "glm", 
+                           family = binomial,
+                           trControl = cv_method)
+
+# Train random forest model with cross-validation
+random_forest_model <- train(target ~ ., 
+                             data = heart_data, 
+                             method = "rf", 
+                             ntree = 500, 
+                             trControl = cv_method)
+
+# Print results
+print("Logistic Regression Model Results:")
+print(logistic_model_cv)
+
+print("Random Forest Model Results:")
+print(random_forest_model)
+
+# Compare models
+results <- resamples(list(Logistic_Regression = logistic_model_cv, 
+                          Random_Forest = random_forest_model))
+print("Model Comparison:")
+print(results)
